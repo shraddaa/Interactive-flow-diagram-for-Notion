@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PDMC Redshift SSOT Schema Explorer</title>
+  <style>
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:#fff; color:#111; }
+    header {
+      position: sticky; top: 0; background: rgba(255,255,255,0.92); backdrop-filter: blur(6px);
+      border-bottom: 1px solid #eee; padding: 12px 16px; display:flex; gap:12px; align-items:center; z-index:5;
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+    .meta { font-size: 12px; color: #555; }
+    .controls { margin-left:auto; display:flex; gap:8px; align-items:center; }
+    button { border:1px solid #ddd; background:#fff; padding:6px 10px; border-radius:10px; cursor:pointer; font-size:12px; }
+    button:hover { background:#f7f7f7; }
+    .hint { padding: 0 16px 12px 16px; font-size: 12px; color:#666; }
+    #wrap { width:100%; height: calc(100vh - 54px); overflow: hidden; }
+    svg { width:100%; height:100%; display:block; }
+    .node circle { fill:#fff; stroke:#111; stroke-width:1.2px; }
+    .node--internal circle { stroke:#2B5FD9; stroke-width:1.8px; fill:#E8F0FE; }
+    .node--root circle { stroke:#111; stroke-width:2px; fill:#fff; }
+    .node text { font-size: 12px; dominant-baseline: middle; user-select:none; }
+    .link { fill:none; stroke:#999; stroke-opacity:0.45; stroke-width:1.4px; }
+    .search { border:1px solid #ddd; padding:6px 10px; border-radius:10px; font-size:12px; width:260px; }
+    .pill { padding:2px 8px; border-radius:999px; border:1px solid #eee; font-size:12px; color:#444; background:#fafafa; }
+    .highlight circle { fill:#fff7cc; stroke:#b26a00; stroke-width:2.2px; }
+    .highlight text { font-weight:700; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+           border:1px solid #eee; background:#fafafa; padding:1px 6px; border-radius:8px; font-size:11px; color:#444; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>PDMC Schema Explorer</h1>
+      <div class="meta">Redshift SSOT views → columns used in workflow</div>
+    </div>
+    <div class="controls">
+      <input id="search" class="search" placeholder="Search view/column (e.g., item_no)" />
+      <span id="count" class="pill">0 matches</span>
+      <button id="expand">Expand all</button>
+      <button id="collapse">Collapse all</button>
+      <button id="fit">Fit to screen</button>
+      <button id="reset">Reset</button>
+    </div>
+  </header>
+  <div class="hint">
+    Click a node to expand/collapse. Drag to pan. Scroll to zoom. Tip: <span class="kbd">Fit to screen</span> centers everything.
+  </div>
+  <div id="wrap">
+    <svg id="svg"></svg>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script>
+    const data = {"name": "Redshift SSOT", "children": [{"name": "v_d_curr_corp_item", "children": [{"name": "pim_product_name"}, {"name": "pim_item_long_desc"}, {"name": "corp_item_no"}, {"name": "corp_item_desc"}, {"name": "subtyp_desc"}, {"name": "type_desc"}, {"name": "corp_item_prod_cat_name"}, {"name": "closure"}, {"name": "bot_type"}, {"name": "is_deleted"}]}, {"name": "v_d_curr_item", "children": [{"name": "item_no"}, {"name": "site"}, {"name": "frontline_price"}, {"name": "item_size"}, {"name": "bottles_case"}, {"name": "item_status_descr"}, {"name": "value_added_packaging_ind"}, {"name": "item_repackage_ind"}, {"name": "item_reserve_flag"}, {"name": "hlday_gift_item_flg"}, {"name": "privat_lbl_item_flg"}, {"name": "item_sold_by_cases_ind"}, {"name": "item_premise_type_sold_at"}, {"name": "item_desc"}, {"name": "status"}]}, {"name": "v_d_customer", "children": [{"name": "customer_no"}, {"name": "site"}, {"name": "stdlinxscd"}, {"name": "primary_warehouse"}, {"name": "customer_name"}, {"name": "premise_code"}, {"name": "location"}]}, {"name": "v_d_warehouse", "children": [{"name": "warehouse_sk"}, {"name": "warehouse_no"}, {"name": "site"}]}, {"name": "v_f_sales", "children": [{"name": "customer_no"}, {"name": "item_no"}, {"name": "site"}, {"name": "posting_prd"}, {"name": "posting_dt_sk"}, {"name": "invoice_no"}, {"name": "sequence_no"}, {"name": "ext_net"}, {"name": "ext_cost"}, {"name": "unit_price"}, {"name": "qty_dec_equ"}, {"name": "cases"}, {"name": "bottles"}, {"name": "ship_dt"}, {"name": "order_no"}, {"name": "entry_origin"}, {"name": "warehouse_sk"}]}, {"name": "v_f_curr_inventory", "children": [{"name": "posting_prd_sk"}, {"name": "site"}, {"name": "inventory_dt_sk"}, {"name": "item_no"}, {"name": "cases_on_hand"}, {"name": "bottles_on_hand"}, {"name": "load_dt"}, {"name": "modified_dt"}, {"name": "floor_cases_on_hand"}, {"name": "floor_bottles_on_hand"}, {"name": "warehouse_sk"}]}, {"name": "v_td_store", "children": [{"name": "stdlinxscd"}, {"name": "trade_channel_desc"}]}]};
+
+    const svg = d3.select("#svg");
+    const g = svg.append("g");
+
+    // Zoom/Pan
+    const zoom = d3.zoom()
+      .scaleExtent([0.2, 3])
+      .on("zoom", (event) => {
+        g.attr("transform", event.transform);
+      });
+    svg.call(zoom);
+
+    const dx = 22;
+    const dy = 240;
+
+    const tree = d3.tree().nodeSize([dx, dy]);
+    const diagonal = d3.linkHorizontal().x(d => d.y).y(d => d.x);
+
+    const root = d3.hierarchy(data);
+    root.x0 = 0;
+    root.y0 = 0;
+
+    // Start collapsed under each view (so you see SSOT → views)
+    root.children.forEach(collapse);
+
+    let i = 0;
+
+    function collapse(d) {
+      if (d.children) {
+        d._children = d.children;
+        d._children.forEach(collapse);
+        d.children = null;
+      }
+    }
+
+    function expandAll(d) {
+      if (d._children) {
+        d.children = d._children;
+        d._children = null;
+      }
+      if (d.children) d.children.forEach(expandAll);
+    }
+
+    function collapseAll(d) {
+      if (d.children) {
+        d.children.forEach(collapseAll);
+        d._children = d.children;
+        d.children = null;
+      }
+    }
+
+    function update(source) {
+      tree(root);
+
+      // Compute bounds
+      const nodes = root.descendants();
+      const links = root.links();
+
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      nodes.forEach(n => {
+        if (n.x < minX) minX = n.x;
+        if (n.x > maxX) maxX = n.x;
+        if (n.y < minY) minY = n.y;
+        if (n.y > maxY) maxY = n.y;
+      });
+
+      // Lay out with margins inside the current viewport (used by Fit)
+      const margin = {top: 40, right: 40, bottom: 40, left: 40};
+
+      // Nodes join
+      const node = g.selectAll("g.node")
+        .data(nodes, d => d.id || (d.id = ++i));
+
+      const nodeEnter = node.enter().append("g")
+        .attr("class", d => {
+          if (d.depth === 0) return "node node--root";
+          if (d.children || d._children) return "node node--internal";
+          return "node";
+        })
+        .attr("transform", d => `translate(${source.y0},${source.x0})`)
+        .on("click", (event, d) => {
+          if (d.children) { d._children = d.children; d.children = null; }
+          else { d.children = d._children; d._children = null; }
+          update(d);
+          applySearchHighlight();
+        });
+
+      nodeEnter.append("circle")
+        .attr("r", d => d.depth === 0 ? 8 : (d.children || d._children ? 6.5 : 5.5));
+
+      nodeEnter.append("text")
+        .attr("x", d => (d.children || d._children) ? -10 : 10)
+        .attr("text-anchor", d => (d.children || d._children) ? "end" : "start")
+        .text(d => d.data.name);
+
+      const t = svg.transition().duration(250);
+
+      node.merge(nodeEnter)
+        .transition(t)
+        .attr("transform", d => `translate(${d.y},${d.x})`);
+
+      node.exit().transition(t)
+        .attr("transform", d => `translate(${source.y},${source.x})`)
+        .remove();
+
+      // Links join
+      const link = g.selectAll("path.link")
+        .data(links, d => d.target.id);
+
+      const linkEnter = link.enter().append("path")
+        .attr("class", "link")
+        .attr("d", d => {
+          const o = {x: source.x0, y: source.y0};
+          return diagonal({source: o, target: o});
+        });
+
+      link.merge(linkEnter)
+        .transition(t)
+        .attr("d", diagonal);
+
+      link.exit().transition(t)
+        .attr("d", d => {
+          const o = {x: source.x, y: source.y};
+          return diagonal({source: o, target: o});
+        })
+        .remove();
+
+      // Stash old positions
+      root.eachBefore(d => { d.x0 = d.x; d.y0 = d.y; });
+
+      // Store bounds for Fit
+      window.__bounds__ = {minX, maxX, minY, maxY, margin};
+    }
+
+    update(root);
+
+    function fitToScreen() {
+      const b = window.__bounds__;
+      if (!b) return;
+      const {minX, maxX, minY, maxY, margin} = b;
+
+      const wrap = document.getElementById("wrap");
+      const w = wrap.clientWidth;
+      const h = wrap.clientHeight;
+
+      const contentW = (maxY - minY) + margin.left + margin.right;
+      const contentH = (maxX - minX) + margin.top + margin.bottom;
+
+      const scale = Math.min(w / contentW, h / contentH, 1.0);
+
+      // Centering translate: map (minY,minX) to margins, then scale, then center
+      const tx = (w - contentW * scale) / 2 - (minY - margin.left) * scale;
+      const ty = (h - contentH * scale) / 2 - (minX - margin.top) * scale;
+
+      svg.transition().duration(350).call(
+        zoom.transform,
+        d3.zoomIdentity.translate(tx, ty).scale(scale)
+      );
+    }
+
+    // Controls
+    document.getElementById("expand").addEventListener("click", () => {
+      expandAll(root); update(root); applySearchHighlight(); fitToScreen();
+    });
+
+    document.getElementById("collapse").addEventListener("click", () => {
+      root.children.forEach(collapseAll); update(root); applySearchHighlight(); fitToScreen();
+    });
+
+    document.getElementById("fit").addEventListener("click", () => fitToScreen());
+
+    document.getElementById("reset").addEventListener("click", () => {
+      collapseAll(root);
+      root.children.forEach(v => {
+        if (v._children) { v.children = v._children; v._children = null; }
+        if (v.children) v.children.forEach(collapse);
+      });
+      update(root);
+      document.getElementById("search").value = "";
+      applySearchHighlight();
+      fitToScreen();
+    });
+
+    // Search highlight
+    const searchEl = document.getElementById("search");
+    searchEl.addEventListener("input", () => applySearchHighlight());
+
+    function applySearchHighlight() {
+      const q = (searchEl.value || "").trim().toLowerCase();
+      let matches = 0;
+
+      g.selectAll("g.node").classed("highlight", d => {
+        const hit = q && d.data.name.toLowerCase().includes(q);
+        if (hit) matches++;
+        return hit;
+      });
+
+      document.getElementById("count").textContent = `${matches} matches`;
+
+      if (q) {
+        // Ensure view-level visible, expand only branches that match
+        root.children.forEach(v => {
+          if (v._children) { v.children = v._children; v._children = null; }
+          if (v.children) {
+            const viewHit = v.data.name.toLowerCase().includes(q);
+            const anyColHit = v.children.some(c => c.data.name.toLowerCase().includes(q));
+            if (viewHit || anyColHit) {
+              // keep columns visible for this view
+            } else {
+              v.children.forEach(collapse);
+            }
+          }
+        });
+        update(root);
+        g.selectAll("g.node").classed("highlight", d => q && d.data.name.toLowerCase().includes(q));
+      }
+    }
+
+    // Fit on first load
+    window.addEventListener("load", () => fitToScreen());
+    window.addEventListener("resize", () => fitToScreen());
+  </script>
+</body>
+</html>
